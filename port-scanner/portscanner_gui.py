@@ -152,7 +152,7 @@ def run_scan(scan_id: str):
 
     s["end"]    = time.time()
     s["status"] = "done"
-    s["events"].append(("done", {"open": len(s["open"]), "duration": round(s["end"]-s["start"],2)}))
+    s["events"].append(("done", {"open": len(s["open"]), "duration": round(s["end"]-s["start"],2), "hostname": s["hostname"]}))
 
 # ─── HTML Frontend ────────────────────────────────────────────────────────────
 HTML = r"""<!DOCTYPE html>
@@ -560,11 +560,16 @@ async function startScan(){
     const data = await res.json();
     if(data.error){ setStatus('Error: '+data.error, 'error'); resetUI(); return; }
     currentScanId = data.scan_id;
-    scanMeta = {target: data.target, ip: data.ip, total: data.total, startTime: Date.now()};
+    scanMeta = {target: data.target, ip: data.ip, hostname: data.hostname, total: data.total, startTime: Date.now()};
 
-    setChips([['IP', data.ip], ['Ports', data.total.toLocaleString()], ['Workers', workers]]);
-    setStatus(`Scanning ${data.ip} — ${data.total.toLocaleString()} ports`, 'running');
-    document.getElementById('results-title').textContent = `Live Results — ${data.ip}`;
+    const hostnameChip = (data.hostname && data.hostname !== data.ip)
+      ? [['HOSTNAME', data.hostname]] : [];
+    setChips([['IP', data.ip], ...hostnameChip, ['Ports', data.total.toLocaleString()], ['Workers', workers]]);
+
+    const displayName = (data.hostname && data.hostname !== data.ip)
+      ? `${data.hostname} (${data.ip})` : data.ip;
+    setStatus(`Scanning ${displayName} — ${data.total.toLocaleString()} ports`, 'running');
+    document.getElementById('results-title').textContent = `Live Results — ${displayName}`;
 
     // Stream events
     if(es) es.close();
@@ -602,7 +607,9 @@ function handleEvent(e){
     const rate = Math.round((scanMeta.total||0) / (d.duration||1));
     document.getElementById('s-time').textContent = dur+'s';
     document.getElementById('s-rate').textContent = rate.toLocaleString()+'/s';
-    setStatus(`Scan complete — ${d.open} open ports found in ${dur}s`, 'done');
+    const displayName = (scanMeta.hostname && scanMeta.hostname !== scanMeta.ip)
+      ? `${scanMeta.hostname} (${scanMeta.ip})` : scanMeta.ip;
+    setStatus(`Scan complete — ${d.open} open ports found on ${displayName} in ${dur}s`, 'done');
     document.getElementById('prog-fill').style.width = '100%';
     document.getElementById('prog-text').textContent = `${scanMeta.total?.toLocaleString()} / ${scanMeta.total?.toLocaleString()}`;
     document.getElementById('prog-pct').textContent = '100%';
@@ -759,7 +766,7 @@ class Handler(BaseHTTPRequestHandler):
             "start": 0.0, "end": 0.0,
         }
         threading.Thread(target=run_scan, args=(scan_id,), daemon=True).start()
-        self._json({"scan_id": scan_id, "ip": ip, "total": len(ports), "target": target})
+        self._json({"scan_id": scan_id, "ip": ip, "hostname": hostname, "total": len(ports), "target": target})
 
     def _sse_stream(self, scan_id):
         if scan_id not in scans:
